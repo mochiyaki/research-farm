@@ -4,6 +4,8 @@ A visual deep-research and fact-checking pipeline where five animal agents plan,
 
 Built for SearchHack ("agents that plan, search, verify, and synthesize across sources" + "new interfaces for working with information"). Search and page reading are powered by the [Telem](https://docs.telem.ai) API.
 
+![the viewer](research_farm.png)
+
 ## Run it
 
 Requires Node.js 18+ and an internet connection. No dependencies to install.
