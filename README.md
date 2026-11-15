@@ -2,7 +2,7 @@
 
 A visual deep-research and fact-checking pipeline where five animal agents plan, search, read, verify and write a cited report — live, in a Three.js scene.
 
-Built for SearchHack ("agents that plan, search, verify, and synthesize across sources" + "new interfaces for working with information"). Search and page reading are powered by the [Telem](https://docs.telem.ai) API.
+Built for SearchHack ("agents that plan, search, verify, and synthesize across sources" + "new interfaces for working with information"). Search and page reading are powered by the Telem API.
 
 ![the viewer](research_farm.png)
 
