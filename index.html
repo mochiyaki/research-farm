@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research Farm</title>
+<style>
+  :root{--bg:#0e1424;--panel:#151d33;--line:#2a3555;--ink:#e8ecf8;--mute:#93a0c4;--acc:#ffb347;--ok:#5fd38d;--warn:#ffcf5c;--bad:#ff7b7b}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,Segoe UI,sans-serif;overflow:hidden}
+  #app{display:grid;grid-template-columns:1fr 440px;grid-template-rows:auto 1fr;height:100%}
+  header{grid-column:1/3;display:flex;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:16px;margin:0 8px 0 0;white-space:nowrap}
+  header h1 span{color:var(--acc)}
+  #q{flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#0b1020;color:var(--ink);font-size:15px;outline:none}
+  #q:focus{border-color:var(--acc)}
+  button{padding:10px 16px;border-radius:10px;border:0;background:var(--acc);color:#231a05;font-weight:700;cursor:pointer;font-size:14px}
+  button:disabled{opacity:.5;cursor:wait}
+  .chip{background:transparent;border:1px solid var(--line);color:var(--mute);font-weight:500;padding:6px 10px;font-size:12px}
+  #stage{position:relative;overflow:hidden;min-width:0}
+  #stage canvas{display:block}
+  .bubble{position:absolute;transform:translate(-50%,-100%);pointer-events:none;text-align:center;white-space:nowrap}
+  .bubble .name{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:#0b1020cc;border:1px solid var(--line)}
+  .bubble .say{display:none;margin:0 auto 4px;max-width:230px;white-space:normal;background:#fff;color:#1a2238;font-size:12px;padding:6px 10px;border-radius:12px;box-shadow:0 4px 14px #0006}
+  .bubble.on .say{display:block}
+  .bubble.active .name{background:var(--acc);color:#231a05;border-color:var(--acc)}
+  #steps{position:absolute;left:12px;bottom:12px;display:flex;gap:6px;flex-wrap:wrap}
+  .step{font-size:11px;padding:4px 10px;border-radius:99px;background:#0b1020cc;border:1px solid var(--line);color:var(--mute)}
+  .step.run{color:#231a05;background:var(--acc);border-color:var(--acc)}
+  .step.done{color:var(--ok);border-color:var(--ok)}
+  aside{display:flex;flex-direction:column;border-left:1px solid var(--line);background:var(--panel);min-height:0}
+  #log{height:170px;overflow:auto;padding:8px 12px;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--mute);border-bottom:1px solid var(--line);flex:none}
+  #log b{color:var(--ink)}
+  #report{flex:1;overflow:auto;padding:14px 16px}
+  #report h2{font-size:18px;margin:0 0 6px}
+  #report h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin:18px 0 6px}
+  #report p{margin:6px 0}
+  #report a{color:#8ab8ff;text-decoration:none}
+  .verdict{padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#0b1020;margin:8px 0}
+  .verdict .big{font-size:16px;font-weight:800}
+  .bar{height:6px;border-radius:9px;background:#26304f;margin-top:6px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--ok)}
+  .ev{border-left:3px solid var(--line);padding:4px 0 4px 10px;margin:8px 0}
+  .ev.c2{border-color:var(--ok)}.ev.c1{border-color:var(--warn)}.ev.c0{border-color:var(--bad)}
+  .tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;border:1px solid currentColor;margin-right:6px;white-space:nowrap}
+  .c2 .tag{color:var(--ok)}.c1 .tag{color:var(--warn)}.c0 .tag{color:var(--bad)}
+  .src{font-size:12px;color:var(--mute);margin:4px 0;overflow-wrap:anywhere}
+  .note{font-size:11px;color:var(--mute);margin-top:16px}
+  .empty{color:var(--mute);text-align:center;margin-top:40px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🐾 <span>Critter</span> Research Lab</h1>
+    <input id="q" placeholder="Ask a research question or paste a claim to fact-check…" value="Does intermittent fasting improve longevity?">
+    <button id="go">Research ▶</button>
+    <button class="chip" data-q="The Great Wall of China is visible from space">claim</button>
+    <button class="chip" data-q="What is the current state of solid-state batteries for EVs?">research</button>
+  </header>
+  <div id="stage">
+    <div id="steps"></div>
+  </div>
+  <aside>
+    <div id="log"></div>
+    <div id="report"><div class="empty">Enter a prompt — the critters will plan, search, read, verify and write the report here.</div></div>
+  </aside>
+</div>
+
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ───────────────────────── 3D scene ───────────────────────── */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1424);
+scene.fog = new THREE.Fog(0x0e1424, 26, 55);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+camera.position.set(0, 12, 17);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0); controls.enableDamping = true; controls.maxPolarAngle = 1.45;
+controls.minDistance = 8; controls.maxDistance = 34;
+
+scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x30405a, 1.1));
+const sun = new THREE.DirectionalLight(0xfff0d0, 1.6);
+sun.position.set(8, 16, 8); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14 });
+scene.add(sun);
+
+const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: .8, ...o });
+const mesh = (g, m, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.castShadow = true; o.receiveShadow = true; return o; };
+const sph = (r, m, x, y, z, s) => { const o = mesh(new THREE.SphereGeometry(r, 20, 16), m, x, y, z); if (s) o.scale.set(...s); return o; };
+
+// island
+scene.add(mesh(new THREE.CylinderGeometry(11.5, 12.5, 1, 48), mat(0x3f8f5a), 0, -.5, 0));
+scene.add(mesh(new THREE.CylinderGeometry(3, 3, .12, 40), mat(0xe8d9a8), 0, .06, 0));
+const ring = mesh(new THREE.TorusGeometry(6.6, .07, 8, 80), mat(0xe8d9a8), 0, .04, 0); ring.rotation.x = Math.PI / 2; scene.add(ring);
+for (let i = 0; i < 40; i++) { // stars
+  const s = sph(.06, new THREE.MeshBasicMaterial({ color: 0xffffff }), (Math.random() - .5) * 70, 6 + Math.random() * 20, -15 - Math.random() * 20); s.castShadow = false; scene.add(s);
+}
+
+function makeAnimal(kind) {
+  const g = new THREE.Group(), black = mat(0x1b1b22), white = mat(0xffffff);
+  const C = { cat: 0xbfc4cf, fox: 0xf07a2a, pig: 0xffa9c0, cow: 0xf7f4ee, hippo: 0x8f86b8 }[kind];
+  const skin = mat(C);
+  const body = sph(.7, kind === 'cat' ? white : skin, 0, .95, 0, [1, 1.1, .9]);
+  const head = new THREE.Group(); head.position.set(0, 2.0, .1);
+  head.add(sph(.58, skin, 0, 0, 0));
+  head.add(sph(.08, black, -.22, .1, .5), sph(.08, black, .22, .1, .5));
+  g.add(body, head);
+  for (const x of [-.3, .3]) g.add(sph(.2, skin, x, .18, .1, [1, .8, 1.3]));
+  const arms = [sph(.17, skin, -.7, 1.15, .15), sph(.17, skin, .7, 1.15, .15)]; g.add(...arms);
+  const cone = (r, h, m, x, y, z) => mesh(new THREE.ConeGeometry(r, h, 12), m, x, y, z);
+  if (kind === 'cat') {
+    head.add(cone(.18, .35, skin, -.32, .55, 0), cone(.18, .35, skin, .32, .55, 0), sph(.07, mat(0xff8fa3), 0, -.05, .57));
+    const cross = new THREE.Group(); cross.add(mesh(new THREE.BoxGeometry(.3, .1, .05), mat(0xe33)), mesh(new THREE.BoxGeometry(.1, .3, .05), mat(0xe33)));
+    cross.position.set(0, 1.15, .66); g.add(cross);
+    const mirror = mesh(new THREE.CylinderGeometry(.16, .16, .04, 16), mat(0xdde6ff, { metalness: .8, roughness: .2 }), 0, .45, .4); mirror.rotation.x = Math.PI / 2; head.add(mirror);
+    g.add(mesh(new THREE.CylinderGeometry(.06, .03, .9, 8), skin, 0, .6, -.7));
+  } else if (kind === 'fox') {
+    head.add(cone(.2, .45, skin, -.32, .58, 0), cone(.2, .45, skin, .32, .58, 0));
+    const sn = cone(.22, .5, white, 0, -.08, .6); sn.rotation.x = Math.PI / 2; head.add(sn, sph(.07, black, 0, -.08, .86));
+    head.add(mesh(new THREE.CylinderGeometry(.75, .75, .05, 24), mat(0x9a7b4f), 0, .42, 0), mesh(new THREE.CylinderGeometry(.4, .45, .3, 24), mat(0x9a7b4f), 0, .58, 0));
+    const tail = sph(.3, skin, 0, .7, -.85, [.8, .8, 1.8]); tail.rotation.x = -.6; g.add(tail, sph(.16, white, 0, 1.0, -1.25));
+  } else if (kind === 'pig') {
+    head.add(sph(.2, skin, -.38, .45, 0, [1, 1, .4]), sph(.2, skin, .38, .45, 0, [1, 1, .4]));
+    const sn = mesh(new THREE.CylinderGeometry(.2, .2, .18, 16), mat(0xff8fae), 0, -.1, .56); sn.rotation.x = Math.PI / 2; head.add(sn);
+    for (const x of [-.22, .22]) { const r = mesh(new THREE.TorusGeometry(.13, .025, 8, 20), black, x, .1, .53); head.add(r); }
+    const pen = mesh(new THREE.CylinderGeometry(.04, .04, .7, 8), mat(0xffd23f), .78, 1.35, .25); pen.rotation.z = -.4; g.add(pen);
+  } else if (kind === 'cow') {
+    head.add(sph(.3, mat(0xffc7b8), 0, -.2, .42, [1.2, .8, 1]), cone(.08, .3, mat(0xeee2c0), -.3, .58, 0), cone(.08, .3, mat(0xeee2c0), .3, .58, 0));
+    head.add(sph(.3, black, .3, .25, .1, [1, 1, .9])); body.add(sph(.3, black, -.4, .2, .35), sph(.25, black, .35, -.2, .45));
+    for (const x of [-.5, .5]) head.add(sph(.22, white, x, .05, -.05, [.8, 1.6, 1])); // judge wig
+    head.add(sph(.4, white, 0, .35, -.1, [1.3, .6, 1]));
+    const gavel = new THREE.Group(); gavel.add(mesh(new THREE.CylinderGeometry(.04, .04, .7, 8), mat(0x7a4b22), 0, .35, 0));
+    const hd = mesh(new THREE.CylinderGeometry(.13, .13, .36, 12), mat(0x7a4b22), 0, .7, 0); hd.rotation.z = Math.PI / 2; gavel.add(hd);
+    gavel.position.set(.75, 1.1, .2); g.add(gavel); g.userData.gavel = gavel;
+  } else if (kind === 'hippo') {
+    body.scale.set(1.2, 1.15, 1.05);
+    head.add(sph(.42, skin, 0, -.18, .4, [1.3, .8, 1]), sph(.12, skin, -.4, .5, 0), sph(.12, skin, .4, .5, 0));
+    head.add(sph(.05, black, -.15, -.1, .78), sph(.05, black, .15, -.1, .78));
+    head.add(mesh(new THREE.BoxGeometry(1, .06, 1), black, 0, .68, 0), mesh(new THREE.CylinderGeometry(.3, .3, .2, 16), black, 0, .58, 0), sph(.06, mat(0xffd23f), .45, .6, .45));
+    const ptr = mesh(new THREE.CylinderGeometry(.03, .03, 1.1, 8), mat(0xd9b17a), -.85, 1.5, .2); ptr.rotation.z = .5; g.add(ptr);
+  }
+  g.userData.head = head; g.userData.arms = arms;
+  return g;
+}
+
+function makeProp(kind) {
+  const g = new THREE.Group();
+  if (kind === 'hippo') { // chalkboard
+    g.add(mesh(new THREE.BoxGeometry(3, 1.8, .12), mat(0x23463a), 0, 2, 0), mesh(new THREE.BoxGeometry(3.2, 2, .08), mat(0x8a5a2b), 0, 2, -.06));
+    for (const x of [-1.3, 1.3]) g.add(mesh(new THREE.BoxGeometry(.1, 1.1, .1), mat(0x8a5a2b), x, .55, 0));
+    for (let i = 0; i < 4; i++) g.add(mesh(new THREE.BoxGeometry(1.6 + (i % 2) * .6, .05, .02), new THREE.MeshBasicMaterial({ color: 0xffffff }), -.2, 2.6 - i * .35, .08));
+  } else if (kind === 'fox') { // globe
+    g.add(mesh(new THREE.CylinderGeometry(.5, .7, .5, 16), mat(0x8a5a2b), 0, .25, 0));
+    const globe = new THREE.Group(); globe.position.y = 1.6;
+    globe.add(sph(1, mat(0x2f7fd6), 0, 0, 0), new THREE.Mesh(new THREE.SphereGeometry(1.03, 12, 8), new THREE.MeshBasicMaterial({ color: 0x9fd0ff, wireframe: true })));
+    for (let i = 0; i < 7; i++) { const a = i * 2.1, b = Math.sin(i * 3) * 1; globe.add(sph(.32, mat(0x4bb36b), Math.cos(a) * Math.cos(b) * .82, Math.sin(b) * .82, Math.sin(a) * Math.cos(b) * .82)); }
+    g.add(globe); g.userData.spin = globe;
+  } else if (kind === 'cat') { // lab bench
+    g.add(mesh(new THREE.BoxGeometry(2.6, .9, 1), mat(0xdfe6f2), 0, .45, 0));
+    [[-.8, 0x59d38a], [0, 0x6fb7ff], [.8, 0xff7ba8]].forEach(([x, c], i) => {
+      g.add(mesh(new THREE.CylinderGeometry(.1, .1, .4, 12), mat(0xffffff, { transparent: true, opacity: .5 }), x, 1.3, 0), sph(.26, mat(c, { emissive: c, emissiveIntensity: .5 }), x, 1.1, 0));
+    });
+    const lens = mesh(new THREE.TorusGeometry(.35, .05, 8, 24), mat(0x333a4d), 1.6, 1.4, 0); g.add(lens, mesh(new THREE.CylinderGeometry(.04, .04, 1.2, 8), mat(0x333a4d), 1.6, .6, 0));
+  } else if (kind === 'cow') { // bench
+    g.add(mesh(new THREE.BoxGeometry(3, 1.5, 1), mat(0x6b4226), 0, .75, 0), mesh(new THREE.BoxGeometry(3.3, .15, 1.2), mat(0x8a5a2b), 0, 1.55, 0));
+    const scale = new THREE.Group(); scale.position.set(0, 1.65, 0);
+    scale.add(mesh(new THREE.CylinderGeometry(.04, .04, 1.2, 8), mat(0xffd23f, { metalness: .6 }), 0, .6, 0));
+    const beam = new THREE.Group(); beam.position.y = 1.2; beam.add(mesh(new THREE.BoxGeometry(1.6, .05, .05), mat(0xffd23f, { metalness: .6 })));
+    for (const x of [-.75, .75]) beam.add(mesh(new THREE.CylinderGeometry(.25, .15, .08, 16), mat(0xffd23f, { metalness: .6 }), x, -.35, 0));
+    scale.add(beam); g.add(scale); g.userData.tilt = beam;
+  } else if (kind === 'pig') { // writing desk
+    g.add(mesh(new THREE.BoxGeometry(2.4, .9, 1.1), mat(0x8a5a2b), 0, .45, 0), mesh(new THREE.BoxGeometry(1, .35, .7), mat(0x3a4256), 0, 1.08, 0));
+    const paper = mesh(new THREE.BoxGeometry(.7, .9, .02), mat(0xffffff, { emissive: 0xffffff, emissiveIntensity: .25 }), 0, 1.6, -.15); paper.rotation.x = -.2; g.add(paper);
+    for (let i = 0; i < 3; i++) g.add(mesh(new THREE.BoxGeometry(.6, .06, .8), mat([0xff7b7b, 0x6fb7ff, 0x5fd38d][i]), .85, .95 + i * .07, 0));
+  }
+  return g;
+}
+
+const ROSTER = [
+  ['hippo', 'Professor Hippo', 'Planner'],
+  ['fox', 'Explorer Fox', 'Searcher'],
+  ['cat', 'Doctor Cat', 'Examiner'],
+  ['cow', 'Judge Cow', 'Verifier'],
+  ['pig', 'Summarizer Pig', 'Writer'],
+];
+const A = {};
+ROSTER.forEach(([id, name, role], i) => {
+  const ang = Math.PI * 1.5 + (i - 2) * 0.62; // hippo left … pig right, fanned around the back arc
+  const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
+  const home = dir.clone().multiplyScalar(6.6);
+  const prop = makeProp(id); prop.position.copy(dir.clone().multiplyScalar(9.3)); prop.lookAt(0, 0, 0); scene.add(prop);
+  const m = makeAnimal(id); m.position.copy(home); m.lookAt(0, 0, 0); scene.add(m);
+  const el = document.createElement('div'); el.className = 'bubble';
+  el.innerHTML = `<div class="say"></div><div class="name">${name} · ${role}</div>`; stage.appendChild(el);
+  A[id] = { id, name, m, home, prop, el, target: null, resolve: null, working: false, jump: false, phase: Math.random() * 6, orbit: null };
+});
+
+// flying document packets
+const packets = [];
+function sendPacket(from, to, color = 0xffffff) {
+  return new Promise(res => {
+    const p = mesh(new THREE.BoxGeometry(.32, .42, .04), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .7 }));
+    scene.add(p); packets.push({ p, a: from.clone(), b: to.clone(), t: 0, res });
+  });
+}
+const headPos = a => a.m.position.clone().add(new THREE.Vector3(0, 2.2, 0));
+const propPos = a => a.prop.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+
+function walkTo(a, pos) { return new Promise(res => { a.orbit = null; a.target = pos.clone(); a.resolve = res; }); }
+const near = (a, b) => b.home.clone().add(a.home.clone().sub(b.home).normalize().multiplyScalar(1.9));
+async function handoff(a, b, color) { await walkTo(a, near(a, b)); await sendPacket(headPos(a), headPos(b), color); await walkTo(a, a.home); }
+function say(a, text, ms = 0) { a.el.querySelector('.say').textContent = text; a.el.classList.toggle('on', !!text); if (ms) setTimeout(() => { if (a.el.querySelector('.say').textContent === text) a.el.classList.remove('on'); }, ms); }
+function setWorking(a, on) { a.working = on; a.el.classList.toggle('active', on); }
+
+const scroll = mesh(new THREE.BoxGeometry(1.5, 2, .08), mat(0xfff8e0, { emissive: 0xffe9a0, emissiveIntensity: .6 }), 0, -3, 0); scene.add(scroll);
+let scrollUp = false;
+
+const clock = new THREE.Clock(), v = new THREE.Vector3();
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime;
+  for (const a of Object.values(A)) {
+    const m = a.m; let y = 0;
+    if (a.orbit) { // run laps around own prop
+      a.orbit.ang += dt * 3.2;
+      const c = a.prop.position; const nx = c.x + Math.cos(a.orbit.ang) * 2.1, nz = c.z + Math.sin(a.orbit.ang) * 2.1;
+      m.lookAt(nx + (nx - m.position.x) * 5, m.position.y, nz + (nz - m.position.z) * 5);
+      m.position.x = nx; m.position.z = nz; y = Math.abs(Math.sin(t * 12)) * .25;
+    } else if (a.target) {
+      v.copy(a.target).sub(m.position); v.y = 0; const d = v.length();
+      if (d < .12) { m.position.x = a.target.x; m.position.z = a.target.z; a.target = null; m.lookAt(0, m.position.y, 0); const r = a.resolve; a.resolve = null; r && r(); }
+      else { v.normalize(); m.position.addScaledVector(v, Math.min(d, dt * 6.5)); m.lookAt(m.position.x + v.x, m.position.y, m.position.z + v.z); y = Math.abs(Math.sin(t * 12 + a.phase)) * .28; }
+    } else if (a.jump) y = Math.abs(Math.sin(t * 7 + a.phase)) * .9;
+    else if (a.working) { y = Math.abs(Math.sin(t * 9 + a.phase)) * .14; m.userData.head.rotation.z = Math.sin(t * 6) * .18; m.userData.arms.forEach((h, i) => h.position.y = 1.25 + Math.sin(t * 14 + i * 3) * .18); }
+    else { m.userData.head.rotation.z = Math.sin(t * 1.5 + a.phase) * .05; m.scale.y = 1 + Math.sin(t * 2 + a.phase) * .015; }
+    m.position.y = y;
+    if (m.userData.gavel) m.userData.gavel.rotation.x = a.working ? Math.abs(Math.sin(t * 8)) * 1.1 : 0;
+    if (a.prop.userData.spin) a.prop.userData.spin.rotation.y += dt * (a.working ? 4 : .4);
+    if (a.prop.userData.tilt) a.prop.userData.tilt.rotation.z = a.working ? Math.sin(t * 5) * .25 : 0;
+    // bubble
+    v.copy(m.position); v.y += 3.1; v.project(camera);
+    a.el.style.left = ((v.x + 1) / 2 * stage.clientWidth) + 'px'; a.el.style.top = ((1 - v.y) / 2 * stage.clientHeight) + 'px';
+  }
+  for (let i = packets.length - 1; i >= 0; i--) {
+    const k = packets[i]; k.t += dt * 1.6; const u = Math.min(k.t, 1);
+    k.p.position.lerpVectors(k.a, k.b, u); k.p.position.y += Math.sin(u * Math.PI) * 2.5; k.p.rotation.y += dt * 9; k.p.rotation.x += dt * 5;
+    if (u >= 1) { scene.remove(k.p); packets.splice(i, 1); k.res(); }
+  }
+  scroll.position.y += ((scrollUp ? 2.2 + Math.sin(t * 2) * .2 : -3) - scroll.position.y) * dt * 3; scroll.rotation.y += dt * 1.2;
+  controls.update(); renderer.render(scene, camera);
+});
+
+/* ───────────────────────── research pipeline ───────────────────────── */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const logEl = $('#log');
+function log(who, msg) { logEl.insertAdjacentHTML('beforeend', `<div><b>${who}</b> ${esc(msg)}</div>`); logEl.scrollTop = 1e9; }
+const STEPS = ['Plan', 'Search', 'Read', 'Verify', 'Write'];
+function setStep(i) { $('#steps').innerHTML = STEPS.map((s, k) => `<span class="step ${k < i ? 'done' : k === i ? 'run' : ''}">${k < i ? '✓ ' : ''}${s}</span>`).join(''); }
+setStep(-1);
+async function api(ep, body) {
+  const r = await fetch('/api/' + ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json(); if (j.error) throw new Error(j.error); return j;
+}
+
+const STOP = new Set('a an the is are was were be been being of in on at to for from by with about as into and or but not no do does did can could should would will may might has have had it its this that these those what which who whom whose when where why how than then there their they them we you your our i he she his her if so such very more most much many some any also just over under between after before during up down out off only own same both each few other'.split(' '));
+const terms = s => (s.toLowerCase().match(/[a-z0-9][a-z0-9\-']+/g) || []).filter(w => w.length > 2 && !STOP.has(w));
+const domain = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const TRUSTED = /(nih\.gov|who\.int|nature\.com|science\.org|wikipedia\.org|reuters\.com|apnews\.com|bbc\.|mayoclinic|harvard|stanford|mit\.edu|nasa\.gov|britannica|sciencedirect|nejm|thelancet|bmj\.com|jamanetwork|snopes|politifact|factcheck\.org|cdc\.gov|arxiv\.org|ieee\.org|acm\.org|economist|nytimes|scientificamerican)/;
+function cred(u) { const d = domain(u); if (/\.(gov|edu)(\.|$)/.test(d) || TRUSTED.test(d)) return .92; if (/\.org$/.test(d)) return .72; if (/(reddit|quora|medium\.com|facebook|tiktok|x\.com|twitter|youtube)/.test(d)) return .35; return .58; }
+const REFUTE = /\b(false|myth|debunk\w*|misleading|misconception|hoax|not true|no evidence|incorrect|untrue|inaccurate|unproven|fake)\b/i;
+const HEDGE = /\b(however|although|but |limited|limitation|risk|caveat|unclear|mixed|inconclusive|controvers\w*|critic\w*|challenge\w*|drawback\w*|concern\w*|not yet|more research)\b/i;
+const JUNK = /(cookie|subscribe|sign in|log in|newsletter|©|all rights reserved|privacy policy|advertis|click here|javascript|share this|follow us)/i;
+
+function sentences(raw) {
+  const txt = raw.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, ' ')
+    .split('\n').map(l => l.replace(/^[\s#>*\-+|]+/, '').replace(/[*_`|]+/g, ' ').trim()).filter(l => l.length > 60).join(' ').replace(/\[\d+\]/g, '').replace(/\s+/g, ' ');
+  return txt.split(/(?<=[.!?])\s+(?=[A-Z"“])/).map(s => s.trim()).filter(s => s.length >= 70 && s.length <= 330 && !JUNK.test(s) && /[a-z]/.test(s));
+}
+
+function plan(q) {
+  const isClaim = !/\?\s*$/.test(q) && !/^(what|how|why|who|when|where|which|compare|explain|describe|should|is|are|does|do|can|will)\b/i.test(q.trim());
+  const facets = isClaim
+    ? [['Core claim', q], ['Fact checks', q + ' fact check true or false'], ['Evidence', q + ' evidence study data'], ['Counterpoints', q + ' myth debunked criticism']]
+    : [['Core answer', q], ['Background', q + ' overview explained'], ['Evidence & data', q + ' research study statistics'], ['Counterpoints', q + ' criticism limitations risks']];
+  return { isClaim, facets: facets.map(([label, query]) => ({ label, query })) };
+}
+
+async function run(q) {
+  const { hippo, fox, cat, cow, pig } = A;
+  $('#report').innerHTML = '<div class="empty">Critters at work…</div>'; logEl.innerHTML = ''; scrollUp = false;
+  Object.values(A).forEach(a => { a.jump = false; say(a, ''); });
+  const qTerms = [...new Set(terms(q))];
+
+  /* 1 ── Professor Hippo plans */
+  setStep(0); setWorking(hippo, true); say(hippo, 'Hmm… let me break this question down.');
+  const P = plan(q);
+  log('🦛 Hippo', `Mode: ${P.isClaim ? 'fact-check' : 'deep research'} · ${P.facets.length} sub-queries`);
+  for (const f of P.facets) { await sendPacket(headPos(hippo), propPos(hippo), 0xffffff); log('🦛 Hippo', `plan → [${f.label}] ${f.query}`); }
+  say(hippo, `${P.facets.length} angles to investigate. Fox, go!`, 3000); setWorking(hippo, false);
+  await handoff(hippo, fox, 0xffd23f);
+
+  /* 2 ── Explorer Fox searches (Telem multi-provider) */
+  setStep(1); setWorking(fox, true); say(fox, 'Sniffing the web via Telem (Exa + Brave)…');
+  fox.orbit = { ang: Math.atan2(fox.m.position.z - fox.prop.position.z, fox.m.position.x - fox.prop.position.x) };
+  const S = new Map();
+  await Promise.all(P.facets.map(async f => {
+    try {
+      const { results } = await api('search', { query: f.query, num: 4 });
+      log('🦊 Fox', `[${f.label}] ${results.length} hits`);
+      for (const r of results) {
+        if (!r.url) continue; const key = r.url.split('#')[0].replace(/\/$/, '');
+        let s = S.get(key);
+        if (!s) { s = { url: r.url, title: r.title, summary: '', facets: new Set(), providers: new Set(), hits: 0, text: '' }; S.set(key, s); sendPacket(propPos(fox), headPos(fox), 0xff9a4d); }
+        s.hits++; s.facets.add(f.label); s.providers.add(r.provider); if (r.summary.length > s.summary.length) s.summary = r.summary;
+      }
+    } catch (e) { log('🦊 Fox', `[${f.label}] search failed: ${e.message}`); }
+  }));
+  let sources = [...S.values()];
+  if (!sources.length) throw new Error('No search results came back.');
+  sources.forEach(s => { s.cred = cred(s.url); const rel = qTerms.filter(w => (s.title + ' ' + s.summary).toLowerCase().includes(w)).length / (qTerms.length || 1); s.score = s.cred * .45 + rel * .35 + Math.min(s.hits, 3) / 3 * .2; });
+  sources.sort((a, b) => b.score - a.score);
+  // keep at most 2 per domain for diversity
+  const perDom = {}; sources = sources.filter(s => (perDom[domain(s.url)] = (perDom[domain(s.url)] || 0) + 1) <= 2).slice(0, 10);
+  sources.forEach((s, i) => s.n = i + 1);
+  fox.orbit = null; setWorking(fox, false);
+  say(fox, `Found ${S.size} pages, keeping the best ${sources.length}!`, 3000);
+  log('🦊 Fox', `${S.size} unique pages → ${sources.length} ranked by credibility × relevance × cross-provider agreement`);
+  await handoff(fox, cat, 0xff9a4d);
+
+  /* 3 ── Doctor Cat reads pages & extracts evidence */
+  setStep(2); setWorking(cat, true); say(cat, 'Examining the full pages… stethoscope out.');
+  const toRead = sources.slice(0, 6);
+  try {
+    const { pages } = await api('fetch', { urls: toRead.map(s => s.url) });
+    for (const p of pages) { const s = toRead.find(x => x.url === p.url) || toRead.find(x => domain(x.url) === domain(p.url) && !x.text); if (s && p.ok) s.text = p.content; }
+    log('🐱 Cat', `fetched ${pages.filter(p => p.ok).length}/${toRead.length} full pages`);
+  } catch (e) { log('🐱 Cat', 'fetch failed, using search highlights: ' + e.message); }
+  const evidence = [];
+  for (const s of sources) {
+    const sents = sentences((s.text || '') + '\n' + s.summary + '.');
+    if (!sents.length && s.summary.length > 60) sents.push(s.summary.slice(0, 300));
+    s.tokens = new Set(terms(s.title + ' ' + s.summary + ' ' + s.text));
+    const scored = sents.map(t => { const tt = new Set(terms(t)); const hit = qTerms.filter(w => tt.has(w)).length; return { text: t, src: s, tt, rel: hit / (qTerms.length || 1) + (/\d/.test(t) ? .12 : 0) + (HEDGE.test(t) ? .05 : 0) }; })
+      .filter(x => x.rel >= .34).sort((a, b) => b.rel - a.rel);
+    const picked = [];
+    for (const c of scored) { if (picked.length >= 3) break; if (!picked.some(p => overlap(p.tt, c.tt) > .6)) picked.push(c); }
+    picked.forEach(() => sendPacket(propPos(cat), headPos(cat), 0x6fb7ff));
+    evidence.push(...picked);
+    log('🐱 Cat', `[${s.n}] ${domain(s.url)} → ${picked.length} evidence snippets`);
+    await sleep(120);
+  }
+  function overlap(a, b) { let n = 0; for (const w of a) if (b.has(w)) n++; return n / Math.min(a.size, b.size || 1); }
+  setWorking(cat, false); say(cat, `${evidence.length} evidence snippets extracted. Your Honour?`, 3000);
+  await handoff(cat, cow, 0x6fb7ff);
+
+  /* 4 ── Judge Cow cross-examines */
+  setStep(3); setWorking(cow, true); say(cow, 'Order! Cross-examining every snippet against the other sources…');
+  for (const e of evidence) {
+    const key = [...e.tt].filter(w => w.length > 3);
+    e.corr = sources.filter(s => domain(s.url) !== domain(e.src.url) && key.length && key.filter(w => s.tokens.has(w)).length / key.length >= .6);
+    const doms = new Set(e.corr.map(s => domain(s.url))).size;
+    e.conf = Math.min(1, e.src.cred * .45 + Math.min(doms, 3) / 3 * .4 + Math.min(e.rel, 1) * .15);
+    e.level = doms >= 2 ? 2 : doms === 1 ? 1 : 0;
+    e.hedge = HEDGE.test(e.text) || REFUTE.test(e.text);
+  }
+  evidence.sort((a, b) => b.conf - a.conf);
+  for (const e of evidence.slice(0, 8)) { await sendPacket(headPos(cow), propPos(cow), [0xff7b7b, 0xffcf5c, 0x5fd38d][e.level]); }
+  const refuters = sources.filter(s => REFUTE.test(s.title + ' ' + s.summary));
+  const refShare = refuters.length / sources.length;
+  const avgConf = evidence.length ? evidence.slice(0, 8).reduce((a, e) => a + e.conf, 0) / Math.min(8, evidence.length) : 0;
+  let verdict;
+  if (!evidence.length) verdict = ['Insufficient evidence', 'var(--bad)'];
+  else if (P.isClaim) verdict = refShare >= .45 ? ['Likely false / widely disputed', 'var(--bad)'] : refShare >= .2 ? ['Contested — sources disagree', 'var(--warn)'] : ['Largely supported by sources', 'var(--ok)'];
+  else verdict = avgConf >= .65 ? ['Well-corroborated findings', 'var(--ok)'] : avgConf >= .45 ? ['Moderately corroborated', 'var(--warn)'] : ['Thin evidence — treat with caution', 'var(--bad)'];
+  const n2 = evidence.filter(e => e.level === 2).length, n1 = evidence.filter(e => e.level === 1).length;
+  log('🐮 Cow', `${n2} corroborated by 2+ independent domains, ${n1} by one, ${evidence.length - n2 - n1} single-source`);
+  log('🐮 Cow', `refutation language in ${refuters.length}/${sources.length} sources → verdict: ${verdict[0]}`);
+  setWorking(cow, false); say(cow, `Verdict: ${verdict[0]}!`, 4000);
+  await handoff(cow, pig, 0x5fd38d);
+
+  /* 5 ── Summarizer Pig writes */
+  setStep(4); setWorking(pig, true); say(pig, 'Oink! Typing up the report…');
+  for (let i = 0; i < 5; i++) { await sendPacket(headPos(pig), propPos(pig), 0xffa9c0); }
+  const cite = e => `<a href="${esc(e.src.url)}" target="_blank" title="${esc(e.src.title)}">[${e.src.n}]</a>` + e.corr.slice(0, 2).map(s => `<a href="${esc(s.url)}" target="_blank" title="corroborated by ${esc(s.title)}">[${s.n}]</a>`).join('');
+  const evHtml = e => `<div class="ev c${e.level}"><span class="tag">${['single-source', 'corroborated ×1', 'corroborated ×' + new Set(e.corr.map(s => domain(s.url))).size][e.level]}</span>${esc(e.text)} ${cite(e)}</div>`;
+  const used = new Set();
+  const take = (list, n) => { const out = []; for (const e of list) { if (out.length >= n) break; if (used.has(e) || out.some(o => overlap(o.tt, e.tt) > .55) || [...used].some(o => overlap(o.tt, e.tt) > .7)) continue; out.push(e); } out.forEach(e => used.add(e)); return out; };
+  const key = take(evidence.filter(e => !e.hedge), 4);
+  let html = `<h2>${esc(q)}</h2>
+    <div class="verdict"><div class="big" style="color:${verdict[1]}">⚖️ ${verdict[0]}</div>
+    <div class="src">${P.isClaim ? 'Fact-check' : 'Deep research'} · ${sources.length} sources · ${evidence.length} evidence snippets · evidence confidence ${(avgConf * 100) | 0}%</div>
+    <div class="bar"><i style="width:${(avgConf * 100) | 0}%;background:${verdict[1]}"></i></div></div>
+    <h3>Key findings</h3>${key.map(evHtml).join('') || '<p class="src">No strongly relevant statements found.</p>'}`;
+  for (const f of P.facets.slice(1, 3)) {
+    const ev = take(evidence.filter(e => e.src.facets.has(f.label) && !e.hedge), 3);
+    if (ev.length) html += `<h3>${f.label}</h3>${ev.map(evHtml).join('')}`;
+  }
+  const caveats = take(evidence.filter(e => e.hedge), 4);
+  if (caveats.length) html += `<h3>Caveats & counterpoints</h3>${caveats.map(evHtml).join('')}`;
+  html += `<h3>Sources</h3>${sources.map(s => `<div class="src">[${s.n}] <a href="${esc(s.url)}" target="_blank">${esc(s.title)}</a><br>${esc(domain(s.url))} · credibility ${(s.cred * 100) | 0}% · via ${[...s.providers].join(' + ')}${s.text ? ' · full page read' : ''}</div>`).join('')}
+    <div class="note">Pipeline: Plan (Hippo) → multi-provider search via Telem (Fox) → full-page fetch & extraction (Cat) → cross-source corroboration (Cow) → synthesis (Pig). Quotes are extracted verbatim from sources; the verdict is a heuristic based on cross-domain agreement and source credibility, not a model judgement.</div>`;
+  $('#report').innerHTML = html; $('#report').scrollTop = 0;
+  log('🐷 Pig', 'report ready ✔'); setWorking(pig, false); say(pig, 'Report is served!', 4000);
+  setStep(5); scrollUp = true;
+  await Promise.all(Object.values(A).map((a, i) => { const ang = Math.PI * (i / 4); return walkTo(a, new THREE.Vector3(Math.cos(ang) * 2.4, 0, Math.sin(ang) * 1.6 + .8)); }));
+  Object.values(A).forEach(a => a.jump = true);
+  await sleep(3500);
+  Object.values(A).forEach(a => a.jump = false);
+  await Promise.all(Object.values(A).map(a => walkTo(a, a.home)));
+}
+
+let busy = false;
+async function start() {
+  const q = $('#q').value.trim(); if (!q || busy) return;
+  busy = true; $('#go').disabled = true;
+  try { await run(q); }
+  catch (e) {
+    log('⚠️', e.message); $('#report').innerHTML = `<div class="empty">Something went wrong: ${esc(e.message)}</div>`;
+    Object.values(A).forEach(a => { a.orbit = null; setWorking(a, false); say(a, ''); walkTo(a, a.home); });
+  }
+  busy = false; $('#go').disabled = false;
+}
+$('#go').onclick = start;
+$('#q').addEventListener('keydown', e => e.key === 'Enter' && start());
+document.querySelectorAll('.chip').forEach(b => b.onclick = () => { $('#q').value = b.dataset.q; start(); });
+</script>
+</body>
+</html>
