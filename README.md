@@ -1,4 +1,4 @@
-# 🐾 Critter Research Lab
+# 🐾 Research Farm
 
 A visual deep-research and fact-checking pipeline where five animal agents plan, search, read, verify and write a cited report — live, in a Three.js scene.
 
